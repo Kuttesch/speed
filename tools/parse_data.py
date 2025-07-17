@@ -4,7 +4,7 @@ import requests
 from tqdm import tqdm
 import os
 
-# Download latest Germany OSM PBF file from Geofabrik
+# Download Bavaria PBF directly
 def download_osm_pbf(url, output_path):
     if os.path.exists(output_path):
         print(f"{output_path} already exists, skipping download.")
@@ -42,9 +42,9 @@ class SpeedHandler(osmium.SimpleHandler):
 
 # Main script
 if __name__ == "__main__":
-    PBF_URL = "https://download.geofabrik.de/europe/germany-latest.osm.pbf"
-    PBF_FILE = "germany-latest.osm.pbf"
-    OUTPUT_JSON = "germany_maxspeed.json"
+    PBF_URL = "https://download.geofabrik.de/europe/germany/bayern-latest.osm.pbf"
+    PBF_FILE = "./files/bavaria-latest.osm.pbf"
+    OUTPUT_JSON = "./files/bavaria_maxspeed.json"
 
     download_osm_pbf(PBF_URL, PBF_FILE)
 
