@@ -1,10 +1,14 @@
 import osmium
-import json
+import sqlite3
 import requests
 from tqdm import tqdm
 import os
 
-# Download Bavaria PBF directly
+DB_PATH = "./files/speed_limits.sqlite"
+PBF_URL = "https://download.geofabrik.de/europe/germany/bayern-latest.osm.pbf"
+PBF_FILE = "./files/bavaria-latest.osm.pbf"
+
+# Download OSM PBF
 def download_osm_pbf(url, output_path):
     if os.path.exists(output_path):
         print(f"{output_path} already exists, skipping download.")
@@ -20,42 +24,58 @@ def download_osm_pbf(url, output_path):
                     f.write(chunk)
                     pbar.update(len(chunk))
 
-# Osmium handler to extract roads with maxspeed
+# Osmium handler
 class SpeedHandler(osmium.SimpleHandler):
-    def __init__(self):
+    def __init__(self, db_cursor):
         super().__init__()
-        self.roads = []
+        self.db = db_cursor
+        self.inserted = 0
 
     def way(self, w):
         if "highway" in w.tags and "maxspeed" in w.tags:
-            coords = []
             try:
-                for n in w.nodes:
-                    coords.append([n.lon, n.lat])
+                coords = [(n.lon, n.lat) for n in w.nodes]
             except Exception:
                 return
-            self.roads.append({
-                "id": w.id,
-                "maxspeed": w.tags["maxspeed"],
-                "geometry": coords
-            })
+            if not coords:
+                return
 
-# Main script
+            # Use midpoint of the geometry
+            mid_idx = len(coords) // 2
+            lon, lat = coords[mid_idx]
+
+            try:
+                speed = int(w.tags["maxspeed"].split()[0])  # crude parsing
+            except:
+                return
+
+            self.db.execute("INSERT INTO speed_limits (id, lat, lon, speed_limit) VALUES (?, ?, ?, ?)",
+                            (w.id, lat, lon, speed))
+            self.db.execute("INSERT INTO geo_index (id, minLat, maxLat, minLon, maxLon) VALUES (?, ?, ?, ?, ?)",
+                            (w.id, lat, lat, lon, lon))
+            self.inserted += 1
+
+# Init SQLite
+def init_db(path):
+    conn = sqlite3.connect(path)
+    c = conn.cursor()
+    c.execute("DROP TABLE IF EXISTS speed_limits;")
+    c.execute("CREATE TABLE speed_limits (id INTEGER PRIMARY KEY, lat REAL, lon REAL, speed_limit INTEGER);")
+    c.execute("CREATE VIRTUAL TABLE geo_index USING rtree(id, minLat, maxLat, minLon, maxLon);")
+    return conn, c
+
+# Main
 if __name__ == "__main__":
-    PBF_URL = "https://download.geofabrik.de/europe/germany/bayern-latest.osm.pbf"
-    PBF_FILE = "./files/bavaria-latest.osm.pbf"
-    OUTPUT_JSON = "./files/bavaria_maxspeed.json"
-
+    os.makedirs("./files", exist_ok=True)
     download_osm_pbf(PBF_URL, PBF_FILE)
 
-    print("Parsing PBF...")
-    handler = SpeedHandler()
+    print("Initializing database...")
+    conn, cur = init_db(DB_PATH)
+
+    print("Parsing and inserting...")
+    handler = SpeedHandler(cur)
     handler.apply_file(PBF_FILE, locations=True)
+    conn.commit()
 
-    print(f"Extracted {len(handler.roads)} roads with maxspeed.")
-
-    print(f"Writing to {OUTPUT_JSON}...")
-    with open(OUTPUT_JSON, "w", encoding="utf-8") as f:
-        json.dump(handler.roads, f, ensure_ascii=False, indent=2)
-
-    print("Done.")
+    print(f"Inserted {handler.inserted} entries.")
+    conn.close()
