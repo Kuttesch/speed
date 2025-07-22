@@ -4,11 +4,10 @@ import requests
 from tqdm import tqdm
 import os
 
-DB_PATH = "./files/speed_limits.sqlite"
 PBF_URL = "https://download.geofabrik.de/europe/germany/bayern-latest.osm.pbf"
 PBF_FILE = "./files/bavaria-latest.osm.pbf"
+DB_PATH = "./files/speed_limits.sqlite"
 
-# Download OSM PBF
 def download_osm_pbf(url, output_path):
     if os.path.exists(output_path):
         print(f"{output_path} already exists, skipping download.")
@@ -24,7 +23,6 @@ def download_osm_pbf(url, output_path):
                     f.write(chunk)
                     pbar.update(len(chunk))
 
-# Osmium handler
 class SpeedHandler(osmium.SimpleHandler):
     def __init__(self, db_cursor):
         super().__init__()
@@ -35,36 +33,36 @@ class SpeedHandler(osmium.SimpleHandler):
         if "highway" in w.tags and "maxspeed" in w.tags:
             try:
                 coords = [(n.lon, n.lat) for n in w.nodes]
-            except Exception:
-                return
-            if not coords:
-                return
-
-            # Use midpoint of the geometry
-            mid_idx = len(coords) // 2
-            lon, lat = coords[mid_idx]
-
-            try:
-                speed = int(w.tags["maxspeed"].split()[0])  # crude parsing
+                if not coords:
+                    return
+                mid_idx = len(coords) // 2
+                lon, lat = coords[mid_idx]
+                speed = int(w.tags["maxspeed"].split()[0])  # crude parse
             except:
                 return
 
-            self.db.execute("INSERT INTO speed_limits (id, lat, lon, speed_limit) VALUES (?, ?, ?, ?)",
-                            (w.id, lat, lon, speed))
-            self.db.execute("INSERT INTO geo_index (id, minLat, maxLat, minLon, maxLon) VALUES (?, ?, ?, ?, ?)",
-                            (w.id, lat, lat, lon, lon))
+            self.db.execute(
+                "INSERT INTO speed_limits (id, lat, lon, speed_limit) VALUES (?, ?, ?, ?)",
+                (w.id, lat, lon, speed)
+            )
             self.inserted += 1
 
-# Init SQLite
 def init_db(path):
     conn = sqlite3.connect(path)
     c = conn.cursor()
     c.execute("DROP TABLE IF EXISTS speed_limits;")
-    c.execute("CREATE TABLE speed_limits (id INTEGER PRIMARY KEY, lat REAL, lon REAL, speed_limit INTEGER);")
-    c.execute("CREATE VIRTUAL TABLE geo_index USING rtree(id, minLat, maxLat, minLon, maxLon);")
+    c.execute("""
+        CREATE TABLE speed_limits (
+            id INTEGER PRIMARY KEY,
+            lat REAL,
+            lon REAL,
+            speed_limit INTEGER
+        );
+    """)
+    c.execute("CREATE INDEX idx_lat ON speed_limits(lat);")
+    c.execute("CREATE INDEX idx_lon ON speed_limits(lon);")
     return conn, c
 
-# Main
 if __name__ == "__main__":
     os.makedirs("./files", exist_ok=True)
     download_osm_pbf(PBF_URL, PBF_FILE)
