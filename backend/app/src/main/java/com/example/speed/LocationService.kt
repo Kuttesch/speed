@@ -25,7 +25,7 @@ class LocationService(
     private lateinit var locationCallback: LocationCallback
     private val locationRequest = LocationRequest.Builder(
         Priority.PRIORITY_HIGH_ACCURACY,
-        2000L // update interval in ms
+        1000L // update interval in ms
     ).build()
 
     private var job: Job? = null
@@ -79,7 +79,7 @@ class LocationService(
      * @param radius Search radius in meters (default: 10).
      * @return Speed limit as a string, or "Not found".
      */
-    private fun queryDB(lat: Double, lon: Double, radius: Double = 10.0): String {
+    private fun queryDB(lat: Double, lon: Double, radius: Double = 100.0): String {
         val dbFile = "speed_limits.sqlite"
         val dbPath = File(context.filesDir, dbFile)
 

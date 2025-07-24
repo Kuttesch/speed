@@ -1,7 +1,7 @@
 package com.example.speed
 
 import android.Manifest
-import android.content.pm.PackageManager
+  import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
