@@ -1,8 +1,9 @@
-import osmium
 import sqlite3
+import os
+import math
+import osmium
 import requests
 from tqdm import tqdm
-import os
 
 PBF_URL = "https://download.geofabrik.de/europe/germany/bayern-latest.osm.pbf"
 PBF_FILE = "./files/bavaria-latest.osm.pbf"
@@ -23,6 +24,27 @@ def download_osm_pbf(url, output_path):
                     f.write(chunk)
                     pbar.update(len(chunk))
 
+def haversine(lat1, lon1, lat2, lon2):
+    R = 6371000  # meters
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = phi2 - phi1
+    dlambda = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+def interpolate_points(lat1, lon1, lat2, lon2, step=5):
+    dist = haversine(lat1, lon1, lat2, lon2)
+    if dist < step:
+        return [(lat1, lon1), (lat2, lon2)]
+    num_points = int(dist // step)
+    return [
+        (
+            lat1 + (lat2 - lat1) * i / num_points,
+            lon1 + (lon2 - lon1) * i / num_points
+        )
+        for i in range(num_points + 1)
+    ]
+
 class SpeedHandler(osmium.SimpleHandler):
     def __init__(self, db_cursor):
         super().__init__()
@@ -31,21 +53,22 @@ class SpeedHandler(osmium.SimpleHandler):
 
     def way(self, w):
         if "highway" in w.tags and "maxspeed" in w.tags:
+            speed_tag = w.tags["maxspeed"]
             try:
-                coords = [(n.lon, n.lat) for n in w.nodes]
-                if not coords:
-                    return
-                mid_idx = len(coords) // 2
-                lon, lat = coords[mid_idx]
-                speed = int(w.tags["maxspeed"].split()[0])  # crude parse
+                speed = int(speed_tag.split()[0])
             except:
                 return
 
-            self.db.execute(
-                "INSERT INTO speed_limits (id, lat, lon, speed_limit) VALUES (?, ?, ?, ?)",
-                (w.id, lat, lon, speed)
-            )
-            self.inserted += 1
+            nodes = w.nodes
+            for i in range(len(nodes) - 1):
+                lat1, lon1 = nodes[i].lat, nodes[i].lon
+                lat2, lon2 = nodes[i+1].lat, nodes[i+1].lon
+                for lat, lon in interpolate_points(lat1, lon1, lat2, lon2, step=5):
+                    self.db.execute(
+                        "INSERT INTO speed_limits (id, lat, lon, speed_limit) VALUES (?, ?, ?, ?)",
+                        (w.id, lat, lon, speed)
+                    )
+                    self.inserted += 1
 
 def init_db(path):
     conn = sqlite3.connect(path)
@@ -53,7 +76,7 @@ def init_db(path):
     c.execute("DROP TABLE IF EXISTS speed_limits;")
     c.execute("""
         CREATE TABLE speed_limits (
-            id INTEGER PRIMARY KEY,
+            id INTEGER,
             lat REAL,
             lon REAL,
             speed_limit INTEGER
